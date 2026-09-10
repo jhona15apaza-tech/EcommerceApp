@@ -1,0 +1,94 @@
+ECOMMERCE APP - ASP.NET Core (.NET 10) + Supabase (solo conexión PostgreSQL)
+==============================================================================
+
+QUÉ SE CORRIGIÓ RESPECTO A TU VERSIÓN ANTERIOR
+-----------------------------------------------
+El error venía del paquete NuGet duplicado y mal escrito:
+
+    dotnet add package L Npgsql.EntityFrameworkCore.PostgreSQ      <- MAL (typo + duplicado)
+    dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+
+Eso rompía la restauración de paquetes y en cascada todos los "no existe en el
+namespace". En este proyecto el .csproj ya tiene la lista de paquetes correcta,
+una sola vez cada uno, con versiones que coinciden entre sí (10.0.0), así que
+NO hace falta que corras "dotnet add package" de nuevo: con "dotnet restore" alcanza.
+
+PASO 1 - Requisitos
+--------------------
+- .NET 10 SDK instalado. Verificá con: dotnet --version (debe empezar con "10.")
+- Herramienta de migraciones (una sola vez en tu máquina):
+    dotnet tool install --global dotnet-ef
+  (si ya la tenías instalada de antes: dotnet tool update --global dotnet-ef)
+
+PASO 2 - Restaurar y compilar
+-------------------------------
+Desde la carpeta EcommerceApp (donde está el .csproj):
+
+    dotnet restore
+    dotnet build
+
+Si compila sin errores, seguís al paso 3. Si da error de paquetes, borrá las
+carpetas bin/ y obj/ y repetí "dotnet restore".
+
+PASO 3 - Conectar con Supabase (SOLO la conexión, sin librería de Supabase)
+-----------------------------------------------------------------------------
+1. Entrá a tu proyecto en supabase.com -> Project Settings -> Database.
+2. En "Connection string" elegí la pestaña "Session pooler" (NO "Direct connection").
+   El pooler tiene salida IPv4 y evita el típico error de timeout.
+3. Copiá host, puerto (normalmente 5432), usuario (formato postgres.xxxxxxxxxxxx)
+   y tu contraseña de base de datos.
+4. Abrí appsettings.json y reemplazá los valores <region>, <tu-project-ref> y
+   <TU_PASSWORD> en la cadena de conexión "DefaultConnection". Quedaría algo así:
+
+   Host=aws-0-us-east-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.abcdefghijk;Password=tu_password_real;SSL Mode=Require;Trust Server Certificate=true
+
+   (Si en el futuro despliegas en algo serverless con muchas conexiones cortas,
+   usá el "Transaction pooler", puerto 6543, en vez del Session pooler.)
+
+PASO 4 - Crear las tablas (migraciones de Entity Framework)
+--------------------------------------------------------------
+No hace falta escribir SQL a mano. Entity Framework crea TODAS las tablas
+(las de login/usuarios y la de Products) a partir del código. Corré:
+
+    dotnet ef migrations add InitialCreate
+    dotnet ef database update
+
+Si ves el error "Unable to create an object of type ApplicationDbContext",
+confirmá que estás parado en la carpeta que tiene el .csproj y que el
+"dotnet restore" del paso 2 terminó sin errores.
+
+PASO 5 - Ejecutar
+-------------------
+    dotnet run
+
+Abrí la URL que te muestre la consola (algo como https://localhost:5001).
+Entrá a "Registrarse" y creá tu primer usuario.
+
+PASO 6 - Convertir tu usuario en Admin (para poder crear/editar/borrar productos)
+-------------------------------------------------------------------------------------
+Por defecto el usuario nuevo no tiene rol. En el SQL Editor de Supabase corré
+una sola vez (reemplazando el email por el que usaste al registrarte):
+
+    INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+    SELECT u."Id", r."Id"
+    FROM "AspNetUsers" u, "AspNetRoles" r
+    WHERE u."Email" = 'tu-email@ejemplo.com' AND r."Name" = 'Admin';
+
+(Opcional) Productos de ejemplo, después de que la migración ya creó la tabla:
+
+    INSERT INTO "Products" ("Name", "Description", "Price", "Stock", "Category", "CreatedAt")
+    VALUES
+    ('Producto 1', 'Descripción del producto 1', 29.99, 10, 'Electrónicos', now()),
+    ('Producto 2', 'Descripción del producto 2', 49.99, 5, 'Ropa', now()),
+    ('Producto 3', 'Descripción del producto 3', 99.99, 3, 'Hogar', now());
+
+PROBLEMAS FRECUENTES
+-----------------------
+- Timeout / no conecta: estás usando el host de "Direct connection" (IPv6-only
+  en muchas redes). Cambiá a "Session pooler" como en el paso 3.
+- "dotnet ef" no se reconoce: te falta el paso 1 (instalar la herramienta global)
+  y después cerrar y volver a abrir la terminal.
+- relation "Products" already exists: corriste un SQL manual de creación de
+  tabla además de la migración. Usá solo las migraciones (paso 4).
+- 400/403 al enviar un formulario: ya está resuelto en este proyecto porque
+  _ViewImports.cshtml tiene @@addTagHelper y todos los <form> usan asp-action.
